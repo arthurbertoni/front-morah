@@ -40,8 +40,8 @@ export function Avatar({ initials = 'MS', size = 42 }: { initials?: string; size
   return <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}><Text style={styles.avatarText}>{initials}</Text></View>;
 }
 
-export function SectionTitle({ title, action }: { title: string; action?: string }) {
-  return <View style={styles.sectionTitle}><Text style={styles.sectionTitleText}>{title}</Text>{action ? <Text style={styles.link}>{action}</Text> : null}</View>;
+export function SectionTitle({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
+  return <View style={styles.sectionTitle}><Text style={styles.sectionTitleText}>{title}</Text>{action ? <Pressable onPress={onAction} hitSlop={8}><Text style={styles.link}>{action}</Text></Pressable> : null}</View>;
 }
 
 export function Card({ children, style }: { children: ReactNode; style?: object }) {
