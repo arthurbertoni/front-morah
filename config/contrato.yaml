@@ -1,0 +1,1221 @@
+openapi: 3.2.0
+info:
+  title: API Gestão Condominial SPL
+  version: 1.0.0
+  description: |
+    Contrato para o backend do app **Gestão Condominial** (frontend em Expo/React
+    Native, repositório separado). Cobre exatamente os recursos entregues
+    nesta iteração do app:
+
+    1. **Comunicados** — síndico publica/edita/remove, morador só lê.
+    2. **Financeiro** — leitura de boletos; síndico vê de todas as unidades,
+       morador só vê os da própria unidade (o servidor filtra pelo token, não
+       por parâmetro de query).
+    3. **Assembleia** — síndico cria/edita/encerra a votação; **cada unidade
+       vota uma única vez** (o servidor identifica a unidade pelo token de
+       quem chama `POST /assembleias/{id}/votos`, não pelo usuário — então
+       não importa qual morador daquela unidade vota, a segunda tentativa
+       retorna `409`).
+    4. **Minha Unidade** — tela única com dois comportamentos por papel:
+       - **síndico**: CRUD de `Bloco`, `Unidade` e `Proprietario` (cadastro do
+         condomínio inteiro);
+       - **morador**: CRUD de `Morador`, `Pet` e `Veiculo` da **própria**
+         unidade (identificada pelo token, nunca por id na URL).
+
+    Todos os demais módulos do produto (portaria, reservas, ocorrências,
+    manutenção, documentos, marketplace, lavanderia, piscina, garagem,
+    prestadores, funcionários) aparecem no app apenas como itens desativados
+    do catálogo — **não fazem parte deste contrato** ainda.
+
+    ## RBAC
+    Papéis: `sindico` e `morador` (ver schema `Usuario.papel`). Cada operação
+    documenta no `description` quem pode chamá-la. O servidor deve rejeitar
+    com `403` qualquer chamada fora do papel indicado — a UI já esconde as
+    ações, mas a API é a linha de defesa real.
+
+    ## Sugestões de padrões de projeto para o BACKEND
+    O frontend já aplica **Singleton** (cliente HTTP único + logger único) e
+    **Template Method** (fluxo CRUD genérico do qual cada repositório só
+    personaliza a rota). No backend, os pontos abaixo se beneficiam dos
+    **outros 2 Template Method** pedidos no escopo — aqui só a indicação,
+    sem implementação, pois cabem melhor do lado do servidor:
+
+    - **`BaseCrudController<T>`**: algoritmo fixo por request (autenticar →
+      autorizar por papel → validar payload → persistir → responder), com
+      hooks `authorize(role)` e `validate(input)` que `ComunicadosController`,
+      `UnidadesController` etc. sobrescrevem. Elimina a repetição de
+      autorização/validação em cada controller de recurso.
+    - **`NotificacaoTemplate`**: esqueleto fixo para disparo de notificação
+      (montar payload → escolher canal → enviar → registrar log), usado ao
+      publicar um `Comunicado` ou ao vincular um `Proprietario` a uma
+      `Unidade`; cada canal (push, e-mail) só implementa `enviar()`.
+  contact:
+    name: Time Gestão Condominial SPL
+
+servers:
+  - url: http://localhost:3333
+    description: Ambiente local de desenvolvimento
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Autenticação
+  - name: Comunicados
+  - name: Financeiro
+  - name: Assembleia
+    description: Síndico configura; cada unidade vota uma única vez.
+  - name: Condomínio
+    description: Blocos, unidades e proprietários — gestão pelo síndico.
+  - name: Minha Unidade
+    description: Moradores, pets e veículos da própria unidade — gestão pelo morador.
+
+paths:
+  /auth/login:
+    post:
+      tags: [Autenticação]
+      summary: Autentica e retorna o token de acesso
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              sindico:
+                summary: Síndico (perfil padrão)
+                value: { email: helena.prado@demo.com.br, senha: demo123 }
+              morador1:
+                summary: Morador — Bloco A · 803
+                value: { email: rafael.nunes@demo.com.br, senha: demo123 }
+              morador2:
+                summary: Morador — Bloco B · 502
+                value: { email: camila.duarte@demo.com.br, senha: demo123 }
+      responses:
+        '200':
+          description: Login bem-sucedido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/NaoAutorizado'
+
+  /auth/logout:
+    post:
+      tags: [Autenticação]
+      summary: Encerra a sessão atual (invalida o token)
+      responses:
+        '204':
+          description: Sessão encerrada
+
+  /auth/me:
+    get:
+      tags: [Autenticação]
+      summary: Retorna o usuário autenticado pelo token atual
+      responses:
+        '200':
+          description: Usuário autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '401':
+          $ref: '#/components/responses/NaoAutorizado'
+
+  /comunicados:
+    get:
+      tags: [Comunicados]
+      summary: Lista os comunicados do condomínio
+      description: Síndico e morador podem chamar.
+      responses:
+        '200':
+          description: Lista de comunicados
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Comunicado' }
+              examples:
+                seed:
+                  summary: Seed de demonstração
+                  value:
+                    - id: com-01
+                      titulo: Manutenção programada dos elevadores
+                      corpo: Os elevadores sociais do Bloco A passarão por manutenção preventiva na terça-feira, das 9h às 12h.
+                      tipo: manutencao
+                      autor: Administração
+                      publicadoEm: '2026-08-29T08:30:00Z'
+                      fixado: true
+                    - id: com-02
+                      titulo: Assembleia geral ordinária · Setembro
+                      corpo: 'Convocamos todos os condôminos para a AGO no dia 30/09, às 19h. Pauta: aprovação de contas.'
+                      tipo: evento
+                      autor: Síndica Helena Prado
+                      publicadoEm: '2026-08-28T18:00:00Z'
+                      fixado: true
+                    - id: com-03
+                      titulo: Reforço na segurança da garagem
+                      corpo: O portão da garagem deve permanecer fechado. Não permita a entrada de veículos desconhecidos.
+                      tipo: urgente
+                      autor: Administração
+                      publicadoEm: '2026-08-26T21:15:00Z'
+                      fixado: false
+    post:
+      tags: [Comunicados]
+      summary: Publica um novo comunicado
+      description: Somente `sindico`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ComunicadoInput' }
+            examples:
+              novo:
+                value: { titulo: Coleta seletiva agora às sextas, corpo: 'A coleta de recicláveis passa a ser feita às sextas-feiras.', tipo: aviso }
+      responses:
+        '201':
+          description: Comunicado publicado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comunicado' }
+        '403':
+          $ref: '#/components/responses/Proibido'
+
+  /comunicados/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Comunicados]
+      summary: Detalha um comunicado
+      responses:
+        '200':
+          description: Comunicado encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comunicado' }
+        '404':
+          $ref: '#/components/responses/NaoEncontrado'
+    patch:
+      tags: [Comunicados]
+      summary: Edita um comunicado (título, corpo, tipo ou fixação)
+      description: Somente `sindico`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ComunicadoInput' }
+      responses:
+        '200':
+          description: Comunicado atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comunicado' }
+        '403':
+          $ref: '#/components/responses/Proibido'
+    delete:
+      tags: [Comunicados]
+      summary: Remove um comunicado
+      description: Somente `sindico`.
+      responses:
+        '204':
+          description: Removido
+        '403':
+          $ref: '#/components/responses/Proibido'
+
+  /financeiro/boletos:
+    get:
+      tags: [Financeiro]
+      summary: Lista boletos
+      description: >-
+        `sindico` recebe os boletos de **todas** as unidades; `morador`
+        recebe somente os da própria unidade. O filtro é feito pelo servidor
+        a partir do token — a API não aceita `unidadeId` por query.
+      responses:
+        '200':
+          description: Lista de boletos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Boleto' }
+              examples:
+                sindico:
+                  summary: Visão do síndico (todas as unidades)
+                  value:
+                    - id: bol-0803-2608
+                      competencia: '2026-08'
+                      descricao: Taxa condominial · Agosto
+                      valor: 1284.90
+                      vencimento: '2026-09-10'
+                      status: aberto
+                      linhaDigitavel: '34191.79001 01043.510047 91020.150008 8 98110000128490'
+                      unidadeId: un-0803
+                      itens:
+                        - { rotulo: Rateio ordinário, valor: 980.00 }
+                        - { rotulo: Fundo de reserva, valor: 196.00 }
+                        - { rotulo: Consumo de água, valor: 108.90 }
+                    - id: bol-0502-2608
+                      competencia: '2026-08'
+                      descricao: Taxa condominial · Agosto
+                      valor: 1150.00
+                      vencimento: '2026-09-10'
+                      status: pago
+                      linhaDigitavel: '34191.79001 01043.510047 91020.150008 8 98110000115000'
+                      unidadeId: un-0502
+                      itens:
+                        - { rotulo: Rateio ordinário, valor: 980.00 }
+                        - { rotulo: Fundo de reserva, valor: 170.00 }
+                morador:
+                  summary: Visão do morador (só a própria unidade)
+                  value:
+                    - id: bol-0803-2608
+                      competencia: '2026-08'
+                      descricao: Taxa condominial · Agosto
+                      valor: 1284.90
+                      vencimento: '2026-09-10'
+                      status: aberto
+                      linhaDigitavel: '34191.79001 01043.510047 91020.150008 8 98110000128490'
+                      unidadeId: un-0803
+                      itens:
+                        - { rotulo: Rateio ordinário, valor: 980.00 }
+                        - { rotulo: Fundo de reserva, valor: 196.00 }
+                        - { rotulo: Consumo de água, valor: 108.90 }
+
+  /financeiro/boletos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Financeiro]
+      summary: Detalha um boleto
+      description: Morador só pode ler boleto da própria unidade (`403` caso contrário).
+      responses:
+        '200':
+          description: Boleto encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Boleto' }
+        '403':
+          $ref: '#/components/responses/Proibido'
+        '404':
+          $ref: '#/components/responses/NaoEncontrado'
+
+  /assembleias:
+    get:
+      tags: [Assembleia]
+      summary: Lista as assembleias
+      description: >-
+        Síndico e morador podem chamar. Cada item já vem com `unidadeJaVotou`
+        e `meuVoto` calculados a partir da unidade de quem está autenticado.
+      responses:
+        '200':
+          description: Lista de assembleias
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Assembleia' }
+              examples:
+                morador-rafael:
+                  summary: Como a unidade 803 (já votou) vê a lista
+                  value:
+                    - id: asb-01
+                      titulo: AGO · aprovação de contas 2026
+                      descricao: Aprovação das contas do exercício e eleição do novo síndico.
+                      encerraEm: '2026-09-30T19:00:00Z'
+                      aberta: true
+                      votos: { sim: 18, nao: 2, abstencao: 1 }
+                      unidadeJaVotou: true
+                      meuVoto: sim
+                    - id: asb-00
+                      titulo: Reforma da fachada
+                      descricao: Aprovação do orçamento de reforma da fachada principal.
+                      encerraEm: '2026-06-15T19:00:00Z'
+                      aberta: false
+                      votos: { sim: 30, nao: 5, abstencao: 3 }
+                      unidadeJaVotou: true
+                      meuVoto: sim
+                morador-camila:
+                  summary: Como a unidade 502 (ainda não votou) vê a mesma lista
+                  value:
+                    - id: asb-01
+                      titulo: AGO · aprovação de contas 2026
+                      descricao: Aprovação das contas do exercício e eleição do novo síndico.
+                      encerraEm: '2026-09-30T19:00:00Z'
+                      aberta: true
+                      votos: { sim: 18, nao: 2, abstencao: 1 }
+                      unidadeJaVotou: false
+    post:
+      tags: [Assembleia]
+      summary: Cria uma assembleia
+      description: Somente `sindico`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssembleiaInput' }
+            examples:
+              nova:
+                value: { titulo: 'AGO · aprovação de contas 2026', descricao: 'Aprovação das contas do exercício e eleição do novo síndico.', encerraEm: '2026-09-30T19:00:00Z' }
+      responses:
+        '201':
+          description: Assembleia criada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Assembleia' }
+        '403':
+          $ref: '#/components/responses/Proibido'
+
+  /assembleias/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Assembleia]
+      summary: Detalha uma assembleia
+      responses:
+        '200':
+          description: Assembleia encontrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Assembleia' }
+        '404':
+          $ref: '#/components/responses/NaoEncontrado'
+    patch:
+      tags: [Assembleia]
+      summary: "Edita a assembleia ou a encerra (`aberta: false`)"
+      description: Somente `sindico`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssembleiaInput' }
+      responses:
+        '200':
+          description: Assembleia atualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Assembleia' }
+        '403':
+          $ref: '#/components/responses/Proibido'
+    delete:
+      tags: [Assembleia]
+      summary: Remove uma assembleia
+      description: Somente `sindico`.
+      responses:
+        '204':
+          description: Removida
+        '403':
+          $ref: '#/components/responses/Proibido'
+
+  /assembleias/{id}/votos:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Assembleia]
+      summary: Registra o voto da unidade do usuário autenticado
+      description: >-
+        Somente `morador`, e somente se a assembleia estiver `aberta`. A
+        unidade é sempre a do token. Retorna `409` se a unidade já votou —
+        essa é a única regra de negócio deste recurso ("um voto por
+        unidade"), aplicada inteiramente no servidor para manter o app
+        simples.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VotoInput' }
+      responses:
+        '200':
+          description: Voto registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Assembleia' }
+        '403':
+          $ref: '#/components/responses/Proibido'
+        '409':
+          description: A unidade já votou nesta assembleia, ou ela está encerrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+
+  /blocos:
+    get:
+      tags: [Condomínio]
+      summary: Lista os blocos do condomínio
+      description: Somente `sindico`.
+      responses:
+        '200':
+          description: Lista de blocos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Bloco' }
+              examples:
+                seed:
+                  value:
+                    - { id: blc-a, nome: Bloco A }
+                    - { id: blc-b, nome: Bloco B }
+    post:
+      tags: [Condomínio]
+      summary: Cadastra um bloco
+      description: Somente `sindico`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BlocoInput' }
+      responses:
+        '201':
+          description: Bloco criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Bloco' }
+
+  /blocos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Condomínio]
+      summary: Detalha um bloco
+      responses:
+        '200':
+          description: Bloco encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Bloco' }
+        '404':
+          $ref: '#/components/responses/NaoEncontrado'
+    patch:
+      tags: [Condomínio]
+      summary: Edita um bloco
+      description: Somente `sindico`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BlocoInput' }
+      responses:
+        '200':
+          description: Bloco atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Bloco' }
+    delete:
+      tags: [Condomínio]
+      summary: Remove um bloco
+      description: Somente `sindico`. Deve falhar com `409` se houver unidades vinculadas.
+      responses:
+        '204':
+          description: Removido
+        '409':
+          description: Bloco possui unidades vinculadas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+
+  /proprietarios:
+    get:
+      tags: [Condomínio]
+      summary: Lista os proprietários cadastrados
+      description: Somente `sindico`.
+      responses:
+        '200':
+          description: Lista de proprietários
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Proprietario' }
+              examples:
+                seed:
+                  value:
+                    - id: prop-01
+                      nome: Rafael Nunes
+                      documento: 'CPF 118.472.905-33'
+                      telefone: '(11) 98812-4477'
+                      email: rafael.nunes@demo.com.br
+                    - id: prop-02
+                      nome: Camila Duarte
+                      documento: 'CPF 220.884.115-70'
+                      telefone: '(11) 99123-6650'
+                      email: camila.duarte@demo.com.br
+    post:
+      tags: [Condomínio]
+      summary: Cadastra um proprietário
+      description: Somente `sindico`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProprietarioInput' }
+      responses:
+        '201':
+          description: Proprietário criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Proprietario' }
+
+  /proprietarios/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Condomínio]
+      summary: Detalha um proprietário
+      responses:
+        '200':
+          description: Proprietário encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Proprietario' }
+        '404':
+          $ref: '#/components/responses/NaoEncontrado'
+    patch:
+      tags: [Condomínio]
+      summary: Edita um proprietário
+      description: Somente `sindico`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProprietarioInput' }
+      responses:
+        '200':
+          description: Proprietário atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Proprietario' }
+    delete:
+      tags: [Condomínio]
+      summary: Remove um proprietário
+      description: Somente `sindico`.
+      responses:
+        '204':
+          description: Removido
+
+  /unidades:
+    get:
+      tags: [Condomínio]
+      summary: Lista as unidades do condomínio
+      description: Somente `sindico`.
+      parameters:
+        - name: blocoId
+          in: query
+          required: false
+          description: Filtra unidades de um bloco específico.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Lista de unidades
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Unidade' }
+              examples:
+                seed:
+                  value:
+                    - id: un-0803
+                      blocoId: blc-a
+                      blocoNome: Bloco A
+                      numero: '803'
+                      label: 'Bloco A · 803'
+                      proprietarioId: prop-01
+                      proprietarioNome: Rafael Nunes
+                    - id: un-0502
+                      blocoId: blc-b
+                      blocoNome: Bloco B
+                      numero: '502'
+                      label: 'Bloco B · 502'
+                      proprietarioId: prop-02
+                      proprietarioNome: Camila Duarte
+    post:
+      tags: [Condomínio]
+      summary: Cadastra uma unidade
+      description: Somente `sindico`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UnidadeInput' }
+      responses:
+        '201':
+          description: Unidade criada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Unidade' }
+
+  /unidades/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Condomínio]
+      summary: Detalha uma unidade
+      responses:
+        '200':
+          description: Unidade encontrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Unidade' }
+        '404':
+          $ref: '#/components/responses/NaoEncontrado'
+    patch:
+      tags: [Condomínio]
+      summary: Edita uma unidade (bloco, número ou proprietário vinculado)
+      description: Somente `sindico`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UnidadeInput' }
+      responses:
+        '200':
+          description: Unidade atualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Unidade' }
+    delete:
+      tags: [Condomínio]
+      summary: Remove uma unidade
+      description: Somente `sindico`.
+      responses:
+        '204':
+          description: Removida
+
+  /minha-unidade/moradores:
+    get:
+      tags: [Minha Unidade]
+      summary: Lista os moradores da unidade do usuário autenticado
+      description: Somente `morador`. A unidade é sempre a do token — nunca vem por parâmetro.
+      responses:
+        '200':
+          description: Lista de moradores
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Morador' }
+              examples:
+                unidade-0803:
+                  summary: Unidade 803 (token do morador Rafael Nunes)
+                  value:
+                    - id: mor-01
+                      nome: Rafael Nunes
+                      tipo: proprietario
+                      documento: 'CPF 118.472.905-33'
+                      telefone: '(11) 98812-4477'
+                      unidadeId: un-0803
+                      unidadeLabel: 'Bloco A · 803'
+                    - id: mor-02
+                      nome: Beatriz Nunes
+                      tipo: dependente
+                      documento: 'RG 45.881.220-9'
+                      telefone: '(11) 99640-1188'
+                      unidadeId: un-0803
+                      unidadeLabel: 'Bloco A · 803'
+                      responsavelId: mor-01
+    post:
+      tags: [Minha Unidade]
+      summary: Cadastra um morador na própria unidade
+      description: Somente `morador`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MoradorInput' }
+      responses:
+        '201':
+          description: Morador criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Morador' }
+
+  /minha-unidade/moradores/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Minha Unidade]
+      summary: Edita um morador da própria unidade
+      description: Somente `morador`. Deve falhar com `403` se o `id` pertencer a outra unidade.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MoradorInput' }
+      responses:
+        '200':
+          description: Morador atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Morador' }
+        '403':
+          $ref: '#/components/responses/Proibido'
+    delete:
+      tags: [Minha Unidade]
+      summary: Remove um morador da própria unidade
+      description: Somente `morador`.
+      responses:
+        '204':
+          description: Removido
+        '403':
+          $ref: '#/components/responses/Proibido'
+
+  /minha-unidade/pets:
+    get:
+      tags: [Minha Unidade]
+      summary: Lista os pets da unidade do usuário autenticado
+      description: Somente `morador`.
+      responses:
+        '200':
+          description: Lista de pets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Pet' }
+              examples:
+                unidade-0803:
+                  summary: Unidade 803
+                  value:
+                    - id: pet-01
+                      nome: Thor
+                      especie: Cão
+                      raca: Golden Retriever
+                      porte: grande
+                      unidadeId: un-0803
+                      vacinas:
+                        - { nome: Antirrábica, aplicadaEm: '2026-02-10', validade: '2027-02-10' }
+    post:
+      tags: [Minha Unidade]
+      summary: Cadastra um pet na própria unidade
+      description: Somente `morador`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PetInput' }
+      responses:
+        '201':
+          description: Pet criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pet' }
+
+  /minha-unidade/pets/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Minha Unidade]
+      summary: Edita um pet da própria unidade
+      description: Somente `morador`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PetInput' }
+      responses:
+        '200':
+          description: Pet atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pet' }
+        '403':
+          $ref: '#/components/responses/Proibido'
+    delete:
+      tags: [Minha Unidade]
+      summary: Remove um pet da própria unidade
+      description: Somente `morador`.
+      responses:
+        '204':
+          description: Removido
+        '403':
+          $ref: '#/components/responses/Proibido'
+
+  /minha-unidade/veiculos:
+    get:
+      tags: [Minha Unidade]
+      summary: Lista os veículos da unidade do usuário autenticado
+      description: Somente `morador`.
+      responses:
+        '200':
+          description: Lista de veículos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Veiculo' }
+              examples:
+                unidade-0803:
+                  summary: Unidade 803
+                  value:
+                    - id: vec-01
+                      placa: FLA-2C19
+                      modelo: Toyota Corolla
+                      cor: Prata
+                      unidadeId: un-0803
+                      unidadeLabel: 'Bloco A · 803'
+                      tag: TAG-88213
+                      tagAtiva: true
+    post:
+      tags: [Minha Unidade]
+      summary: Cadastra um veículo na própria unidade
+      description: Somente `morador`. A tag é criada inativa até liberação da portaria (fora deste contrato).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VeiculoInput' }
+      responses:
+        '201':
+          description: Veículo criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Veiculo' }
+
+  /minha-unidade/veiculos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Minha Unidade]
+      summary: Edita um veículo da própria unidade
+      description: Somente `morador`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VeiculoInput' }
+      responses:
+        '200':
+          description: Veículo atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Veiculo' }
+        '403':
+          $ref: '#/components/responses/Proibido'
+    delete:
+      tags: [Minha Unidade]
+      summary: Remove um veículo da própria unidade
+      description: Somente `morador`.
+      responses:
+        '204':
+          description: Removido
+        '403':
+          $ref: '#/components/responses/Proibido'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    NaoAutorizado:
+      description: Credenciais inválidas ou token ausente/expirado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Erro' }
+    Proibido:
+      description: Papel do usuário não tem permissão para esta operação
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Erro' }
+    NaoEncontrado:
+      description: Recurso não encontrado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Erro' }
+
+  schemas:
+    Erro:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+
+    Role:
+      type: string
+      enum: [sindico, morador]
+
+    Usuario:
+      type: object
+      required: [id, nome, email, papel, unidadeId, unidadeLabel, avatarIniciais]
+      properties:
+        id: { type: string }
+        nome: { type: string }
+        email: { type: string, format: email }
+        papel: { $ref: '#/components/schemas/Role' }
+        unidadeId: { type: string }
+        unidadeLabel: { type: string, example: 'Bloco A · 803' }
+        avatarIniciais: { type: string, example: 'HP' }
+
+    LoginRequest:
+      type: object
+      required: [email, senha]
+      properties:
+        email: { type: string, format: email }
+        senha: { type: string, format: password }
+
+    LoginResponse:
+      type: object
+      required: [accessToken, usuario]
+      properties:
+        accessToken: { type: string }
+        usuario: { $ref: '#/components/schemas/Usuario' }
+
+    ComunicadoTipo:
+      type: string
+      enum: [aviso, urgente, evento, manutencao]
+
+    Comunicado:
+      type: object
+      required: [id, titulo, corpo, tipo, autor, publicadoEm, fixado]
+      properties:
+        id: { type: string }
+        titulo: { type: string }
+        corpo: { type: string }
+        tipo: { $ref: '#/components/schemas/ComunicadoTipo' }
+        autor: { type: string, description: Nome do síndico que publicou (preenchido pelo servidor). }
+        publicadoEm: { type: string, format: date-time }
+        fixado: { type: boolean }
+
+    ComunicadoInput:
+      type: object
+      description: >-
+        Usado em POST (`titulo`, `corpo` e `tipo` obrigatórios) e em PATCH
+        (todos os campos opcionais — envie só o que quer alterar; é assim
+        que o app fixa/desfixa um comunicado, mandando só `{ fixado }`).
+      properties:
+        titulo: { type: string }
+        corpo: { type: string }
+        tipo: { $ref: '#/components/schemas/ComunicadoTipo' }
+        fixado: { type: boolean }
+
+    BoletoStatus:
+      type: string
+      enum: [pago, aberto, vencido]
+
+    BoletoItem:
+      type: object
+      required: [rotulo, valor]
+      properties:
+        rotulo: { type: string }
+        valor: { type: number, format: double }
+
+    Boleto:
+      type: object
+      required: [id, competencia, descricao, valor, vencimento, status, linhaDigitavel, unidadeId, itens]
+      properties:
+        id: { type: string }
+        competencia: { type: string, example: '2026-08' }
+        descricao: { type: string }
+        valor: { type: number, format: double }
+        vencimento: { type: string, format: date }
+        status: { $ref: '#/components/schemas/BoletoStatus' }
+        linhaDigitavel: { type: string }
+        unidadeId: { type: string }
+        itens:
+          type: array
+          items: { $ref: '#/components/schemas/BoletoItem' }
+
+    VotoOpcao:
+      type: string
+      enum: [sim, nao, abstencao]
+
+    Assembleia:
+      type: object
+      required: [id, titulo, descricao, encerraEm, aberta, votos, unidadeJaVotou]
+      properties:
+        id: { type: string }
+        titulo: { type: string }
+        descricao: { type: string }
+        encerraEm: { type: string, format: date-time }
+        aberta: { type: boolean }
+        votos:
+          type: object
+          required: [sim, nao, abstencao]
+          properties:
+            sim: { type: integer, minimum: 0 }
+            nao: { type: integer, minimum: 0 }
+            abstencao: { type: integer, minimum: 0 }
+        unidadeJaVotou:
+          type: boolean
+          description: A unidade do usuário autenticado já votou.
+        meuVoto:
+          allOf: [{ $ref: '#/components/schemas/VotoOpcao' }]
+          description: Só presente quando `unidadeJaVotou` é `true`.
+
+    AssembleiaInput:
+      type: object
+      description: >-
+        Usado em POST (`titulo`, `descricao` e `encerraEm` obrigatórios) e em
+        PATCH (todos opcionais — para encerrar, o app manda só `{ aberta: false }`
+        junto dos campos que já tinha).
+      properties:
+        titulo: { type: string }
+        descricao: { type: string }
+        encerraEm: { type: string, format: date-time }
+        aberta:
+          type: boolean
+          description: Omitido na criação (nasce `true`); enviar `false` para encerrar.
+
+    VotoInput:
+      type: object
+      required: [opcao]
+      properties:
+        opcao: { $ref: '#/components/schemas/VotoOpcao' }
+
+    Bloco:
+      type: object
+      required: [id, nome]
+      properties:
+        id: { type: string }
+        nome: { type: string, example: 'Bloco A' }
+
+    BlocoInput:
+      type: object
+      description: Usado em POST (`nome` obrigatório) e em PATCH (opcional).
+      properties:
+        nome: { type: string }
+
+    Proprietario:
+      type: object
+      required: [id, nome, documento, telefone, email]
+      properties:
+        id: { type: string }
+        nome: { type: string }
+        documento: { type: string, example: 'CPF 118.472.905-33' }
+        telefone: { type: string }
+        email: { type: string, format: email }
+
+    ProprietarioInput:
+      type: object
+      description: >-
+        Usado em POST (todos os campos obrigatórios) e em PATCH (todos
+        opcionais).
+      properties:
+        nome: { type: string }
+        documento: { type: string }
+        telefone: { type: string }
+        email: { type: string, format: email }
+
+    Unidade:
+      type: object
+      required: [id, blocoId, blocoNome, numero, label, proprietarioId, proprietarioNome]
+      properties:
+        id: { type: string }
+        blocoId: { type: string }
+        blocoNome: { type: string }
+        numero: { type: string, example: '803' }
+        label: { type: string, example: 'Bloco A · 803' }
+        proprietarioId: { type: [string, 'null'] }
+        proprietarioNome: { type: [string, 'null'] }
+
+    UnidadeInput:
+      type: object
+      description: >-
+        Usado em POST (`blocoId` e `numero` obrigatórios) e em PATCH (todos
+        opcionais).
+      properties:
+        blocoId: { type: string }
+        numero: { type: string }
+        proprietarioId: { type: [string, 'null'] }
+
+    TipoMorador:
+      type: string
+      enum: [proprietario, inquilino, dependente]
+
+    Morador:
+      type: object
+      required: [id, nome, tipo, documento, telefone, unidadeId, unidadeLabel]
+      properties:
+        id: { type: string }
+        nome: { type: string }
+        tipo: { $ref: '#/components/schemas/TipoMorador' }
+        documento: { type: string }
+        telefone: { type: string }
+        unidadeId: { type: string }
+        unidadeLabel: { type: string }
+        responsavelId:
+          type: [string, 'null']
+          description: Preenchido quando `tipo` é `dependente`.
+
+    MoradorInput:
+      type: object
+      description: >-
+        Usado em POST (todos os campos obrigatórios) e em PATCH (todos
+        opcionais).
+      properties:
+        nome: { type: string }
+        tipo: { $ref: '#/components/schemas/TipoMorador' }
+        documento: { type: string }
+        telefone: { type: string }
+
+    Vacina:
+      type: object
+      required: [nome, aplicadaEm, validade]
+      properties:
+        nome: { type: string }
+        aplicadaEm: { type: string, format: date }
+        validade: { type: string, format: date }
+
+    Porte:
+      type: string
+      enum: [pequeno, medio, grande]
+
+    Pet:
+      type: object
+      required: [id, nome, especie, raca, porte, unidadeId, vacinas]
+      properties:
+        id: { type: string }
+        nome: { type: string }
+        especie: { type: string, example: 'Cão' }
+        raca: { type: string }
+        porte: { $ref: '#/components/schemas/Porte' }
+        unidadeId: { type: string }
+        vacinas:
+          type: array
+          items: { $ref: '#/components/schemas/Vacina' }
+
+    PetInput:
+      type: object
+      description: >-
+        Usado em POST (todos os campos obrigatórios) e em PATCH (todos
+        opcionais).
+      properties:
+        nome: { type: string }
+        especie: { type: string }
+        raca: { type: string }
+        porte: { $ref: '#/components/schemas/Porte' }
+
+    Veiculo:
+      type: object
+      required: [id, placa, modelo, cor, unidadeId, unidadeLabel, tag, tagAtiva]
+      properties:
+        id: { type: string }
+        placa: { type: string, example: 'ABC-1D23' }
+        modelo: { type: string }
+        cor: { type: string }
+        unidadeId: { type: string }
+        unidadeLabel: { type: string }
+        tag: { type: string }
+        tagAtiva: { type: boolean }
+
+    VeiculoInput:
+      type: object
+      description: >-
+        Usado em POST (todos os campos obrigatórios) e em PATCH (todos
+        opcionais).
+      properties:
+        placa: { type: string }
+        modelo: { type: string }
+        cor: { type: string }
+        tag: { type: string }
