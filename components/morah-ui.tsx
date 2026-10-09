@@ -1,6 +1,23 @@
-import { ReactNode } from 'react';
+import { createContext, ReactNode, useContext, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { ChevronRight, CircleAlert, CircleCheck, Clock3, LucideIcon } from 'lucide-react-native';
+
+export type UserProfile = 'morador' | 'sindico';
+
+type ProfileContextValue = { profile: UserProfile; setProfile: (profile: UserProfile) => void };
+
+const ProfileContext = createContext<ProfileContextValue | null>(null);
+
+export function ProfileProvider({ children }: { children: ReactNode }) {
+  const [profile, setProfile] = useState<UserProfile>('morador');
+  return <ProfileContext.Provider value={{ profile, setProfile }}>{children}</ProfileContext.Provider>;
+}
+
+export function useUserProfile() {
+  const context = useContext(ProfileContext);
+  if (!context) throw new Error('useUserProfile must be used within ProfileProvider');
+  return context;
+}
 
 export const colors = {
   ink: '#102A2A',
@@ -40,8 +57,8 @@ export function Avatar({ initials = 'MS', size = 42 }: { initials?: string; size
   return <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}><Text style={styles.avatarText}>{initials}</Text></View>;
 }
 
-export function SectionTitle({ title, action }: { title: string; action?: string }) {
-  return <View style={styles.sectionTitle}><Text style={styles.sectionTitleText}>{title}</Text>{action ? <Text style={styles.link}>{action}</Text> : null}</View>;
+export function SectionTitle({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
+  return <View style={styles.sectionTitle}><Text style={styles.sectionTitleText}>{title}</Text>{action ? <Pressable onPress={onAction} hitSlop={8}><Text style={styles.link}>{action}</Text></Pressable> : null}</View>;
 }
 
 export function Card({ children, style }: { children: ReactNode; style?: object }) {
