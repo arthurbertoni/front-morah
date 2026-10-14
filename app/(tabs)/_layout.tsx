@@ -1,49 +1,79 @@
-import { Tabs } from 'expo-router';
-import { LayoutDashboard, Megaphone, MoreHorizontal, Package, WalletCards } from 'lucide-react-native';
+import { Redirect, Tabs } from 'expo-router';
+import {
+  Building2,
+  CalendarDays,
+  LayoutDashboard,
+  LucideIcon,
+  Megaphone,
+  MoreHorizontal,
+  Package,
+  Settings,
+  ShieldCheck,
+  WalletCards,
+  Bell,
+} from 'lucide-react-native';
 import { StyleSheet, View } from 'react-native';
+import { colors, Loading, Page } from '@/components/morah-ui';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCondominio } from '@/contexts/CondominioContext';
+import type { ModuloCodigo, Perfil } from '@/lib/api/types';
 
-const colors = {
-  ink: '#102A2A',
-  muted: '#6F817E',
-  line: '#E2EBE8',
-  paper: '#F7FAF8',
-  white: '#FFFFFF',
-  teal: '#0C716D',
-};
+type Aba = { nome: string; titulo: string; icone: LucideIcon; modulo?: ModuloCodigo; perfis: Perfil[] };
+
+const MORADORES: Perfil[] = ['morador', 'proprietario'];
+
+// Abas visíveis por perfil (no máximo 5 na barra). As demais telas continuam acessíveis
+// pelos atalhos de "Início" e "Mais", mas ficam fora da barra (href: null).
+const ABAS: Aba[] = [
+  { nome: 'index', titulo: 'Início', icone: LayoutDashboard, perfis: ['morador', 'proprietario', 'sindico', 'portaria'] },
+  { nome: 'financeiro', titulo: 'Financeiro', icone: WalletCards, modulo: 'financeiro', perfis: [...MORADORES, 'sindico'] },
+  { nome: 'portaria', titulo: 'Portaria', icone: ShieldCheck, modulo: 'portaria', perfis: [...MORADORES, 'portaria'] },
+  { nome: 'encomendas', titulo: 'Encomendas', icone: Package, modulo: 'encomendas', perfis: ['portaria'] },
+  { nome: 'reservas', titulo: 'Reservas', icone: CalendarDays, modulo: 'reservas', perfis: ['portaria'] },
+  { nome: 'avisos', titulo: 'Avisos', icone: Megaphone, modulo: 'avisos', perfis: [...MORADORES, 'sindico'] },
+  { nome: 'configuracoes', titulo: 'Condomínio', icone: Settings, perfis: ['sindico'] },
+  { nome: 'mais', titulo: 'Mais', icone: MoreHorizontal, perfis: ['morador', 'proprietario', 'sindico', 'portaria'] },
+  // Telas fora da barra
+  { nome: 'unidade', titulo: 'Minha unidade', icone: Building2, modulo: 'minha_unidade', perfis: [] },
+  { nome: 'unidades', titulo: 'Unidades', icone: Building2, modulo: 'minha_unidade', perfis: [] },
+  { nome: 'notificacoes', titulo: 'Notificações', icone: Bell, perfis: [] },
+];
 
 export default function TabsLayout() {
+  const { me, perfil, carregando } = useAuth();
+  const { moduloAtivo, tema } = useCondominio();
+
+  if (carregando) return <Page><Loading label="Abrindo o Morah…" /></Page>;
+  if (!me || !perfil) return <Redirect href="/login" />;
+
+  const visivel = (aba: Aba) => aba.perfis.includes(perfil) && (!aba.modulo || moduloAtivo(aba.modulo));
+
   return (
     <Tabs
-      screenOptions={({ route }) => ({
+      screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.teal,
+        tabBarActiveTintColor: tema.primaria,
         tabBarInactiveTintColor: '#91A19E',
         tabBarStyle: styles.tabBar,
         tabBarLabelStyle: styles.tabLabel,
         tabBarItemStyle: styles.tabItem,
-        tabBarIcon: ({ color, focused }) => {
-          const Icon = route.name === 'index'
-            ? LayoutDashboard
-            : route.name === 'financeiro'
-              ? WalletCards
-              : route.name === 'portaria'
-                ? Package
-                : route.name === 'avisos'
-                  ? Megaphone
-                  : MoreHorizontal;
-          return (
-            <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
-              <Icon size={20} color={color} strokeWidth={focused ? 2.4 : 2} />
-            </View>
-          );
-        },
-      })}
+      }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Início' }} />
-      <Tabs.Screen name="financeiro" options={{ title: 'Financeiro' }} />
-      <Tabs.Screen name="portaria" options={{ title: 'Portaria' }} />
-      <Tabs.Screen name="avisos" options={{ title: 'Avisos' }} />
-      <Tabs.Screen name="mais" options={{ title: 'Mais' }} />
+      {ABAS.map((aba) => (
+        <Tabs.Screen
+          key={aba.nome}
+          name={aba.nome}
+          options={{
+            title: aba.titulo,
+            href: visivel(aba) ? undefined : null,
+            tabBarIcon: ({ color, focused }) => (
+              <View style={[styles.iconWrap, focused && { backgroundColor: tema.primariaSoft }]}>
+                <aba.icone size={20} color={color} strokeWidth={focused ? 2.4 : 2} />
+              </View>
+            ),
+          }}
+        />
+      ))}
     </Tabs>
   );
 }
@@ -72,8 +102,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 10,
-  },
-  iconWrapActive: {
-    backgroundColor: '#E2F3F0',
   },
 });

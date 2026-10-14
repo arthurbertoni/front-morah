@@ -1,0 +1,372 @@
+@"C:\Users\Ana Beluzzo\Downloads\morah-openapi.yaml" Você é um desenvolvedor Java e Spring Boot experiente. Vai construir o backend de um projeto acadêmico de alunos do 6º período de Engenharia de Software: o **Morah**, um sistema de gestão de condomínios.
+
+## Regra principal: o contrato OpenAPI é a fonte da verdade
+Implemente EXATAMENTE os endpoints, schemas, nomes de campos, parâmetros, códigos HTTP, perfis e regras descritos no contrato anexo `morah-openapi.yaml` ("Morah API — Gestão Condominial", v2.0.0). Nada além disso:
+- Não crie endpoints, campos, DTOs, perfis ou funcionalidades que não estejam no contrato.
+- As regras de negócio estão no `description` de cada operação e de cada schema. Leia todas antes de começar.
+- A entidade `Ocorrencia` existe só porque o contrato a cria em dois pontos: vistoria com dano e extravio de encomenda. Não há CRUD de ocorrências.
+- Quando o contrato for omisso, siga a seção **"Regras de negócio"** abaixo. Se surgir uma dúvida que ela não cobre, escolha a opção mais simples e registre a decisão no README.
+
+<<ANEXE AQUI O ARQUIVO morah-openapi.yaml>>
+
+## Simplicidade e autoria
+O código deve ser simples o bastante para que os alunos entendam, expliquem e defendam cada linha numa apresentação:
+- Use o mínimo de classes possível. Sem camadas, interfaces ou abstrações que não sejam usadas.
+- Não use Keycloak, jjwt, MapStruct, Flyway, Docker, Swagger UI ou qualquer biblioteca não listada em "Stack".
+- Comentários curtos em português, explicando o porquê das partes importantes.
+
+## Padronização de nomes
+- Classes, records, enums e interfaces em PascalCase: `Aviso`, `ReservaCreateRequest`, `StatusEncomenda`.
+- Métodos e variáveis em camelCase, com métodos começando por verbo: `registrarVisitante()`, `unidadeId`.
+- Constantes em UPPER_SNAKE_CASE: `MINUTOS_EXPIRACAO_AUTORIZACAO`.
+- Pacotes em minúsculas, sem underscore: `br.com.morah.controller`.
+- Constantes de enum em maiúsculas, mantendo no JSON o valor exato do contrato via `@JsonValue`. Exemplos: `AGUARDANDO_RETIRADA` → `"aguardando_retirada"`, `MINHA_UNIDADE` → `"minha_unidade"`, `SINDICO` → `"sindico"`.
+- Sem acentos nem "ç" em identificadores: `Condominio`, `Personalizacao`.
+- Sufixos técnicos do Spring em inglês: `AvisoController`, `AvisoService`, `AvisoRepository`.
+- Getters e setters no padrão JavaBeans.
+- Nomes de campos dos DTOs idênticos aos do contrato.
+- Tabelas e colunas em snake_case: `autorizacao_visita`, `publicado_em`.
+- Mensagens de erro, comentários, nomes de testes e README em português.
+- Nomes de testes descrevendo o comportamento, por exemplo `deveRetornar409QuandoReservaSobrepoeOutra()`.
+
+## Padrão dos métodos
+Em controllers e services:
+- `criarXxx` → POST que cria recurso
+- `alterarXxx` → PATCH de edição
+- `deletarXxx` → DELETE
+- `buscarXxx` → GET por id (singular)
+- `buscarXxxs` → GET de lista (plural)
+
+Operações que não são CRUD usam o verbo da ação. No `BaseCrudController<T>`, os métodos genéricos se chamam `criar`, `alterar`, `deletar`, `buscar` e `buscarTodos`; os controllers de recurso apenas os expõem com os nomes da tabela abaixo.
+
+Exceção: os repositories mantêm os prefixos do Spring Data em inglês (`findByUnidadeId`, `existsByAreaComumId...`).
+
+Use exatamente estes nomes de método (o `operationId` do contrato aparece entre parênteses só como referência):
+
+| Endpoint | Método |
+|---|---|
+| POST /auth/login | login |
+| GET /auth/me | buscarMe (getMe) |
+| POST /auth/contexto | selecionarContexto |
+| POST /auth/refresh | renovarToken |
+| POST /auth/logout | logout |
+| GET /home/dashboard | buscarDashboard (getDashboard) |
+| GET /financeiro/cobrancas | buscarCobrancas (listarCobrancas) |
+| GET /financeiro/cobrancas/{cobrancaId} | buscarCobranca (getCobranca) |
+| GET /financeiro/cobrancas/{cobrancaId}/pix | gerarPix (getPixCobranca) |
+| POST /financeiro/cobrancas/{cobrancaId}/baixa-manual | baixarCobrancaManualmente |
+| POST /financeiro/webhooks/pagamentos | receberWebhookPagamento |
+| GET /financeiro/documentos | buscarDocumentosFinanceiros (listarDocumentosFinanceiros) |
+| POST /financeiro/documentos | criarDocumentoFinanceiro (publicarDocumentoFinanceiro) |
+| POST /financeiro/taxas | criarTaxa |
+| POST /financeiro/taxas/{taxaId}/gerar-cobrancas | gerarCobrancasEmLote |
+| GET /financeiro/inadimplencia | buscarResumoInadimplencia (getResumoInadimplencia) |
+| POST /portaria/visitantes | registrarVisitante |
+| GET /portaria/autorizacoes | buscarAutorizacoes (listarAutorizacoes) |
+| GET /portaria/autorizacoes/{autorizacaoId} | buscarAutorizacao (getAutorizacao) |
+| PATCH /portaria/autorizacoes/{autorizacaoId}/decisao | decidirAutorizacao |
+| POST /portaria/autorizacoes/{autorizacaoId}/reenviar | reenviarAutorizacao |
+| GET /portaria/acessos | buscarAcessos (listarAcessos) |
+| POST /portaria/acessos | registrarAcesso |
+| GET /avisos | buscarAvisos (listarAvisos) |
+| POST /avisos | criarAviso |
+| GET /avisos/{avisoId} | buscarAviso (getAviso) |
+| PATCH /avisos/{avisoId} | alterarAviso (atualizarAviso) |
+| DELETE /avisos/{avisoId} | deletarAviso (removerAviso) |
+| GET /areas-comuns | buscarAreasComuns (listarAreasComuns) |
+| GET /areas-comuns/{areaComumId}/disponibilidade | buscarDisponibilidade (getDisponibilidadeAreaComum) |
+| GET /reservas | buscarReservas (listarReservas) |
+| POST /reservas | criarReserva |
+| GET /reservas/{reservaId} | buscarReserva (getReserva) |
+| DELETE /reservas/{reservaId} | deletarReserva (cancelarReserva) |
+| POST /reservas/{reservaId}/vistoria | registrarVistoria (registrarVistoriaReserva) |
+| GET /unidades/minha | buscarMinhaUnidade (getMinhaUnidade) |
+| GET /unidades/minha/vinculos | buscarVinculos (listarVinculosMinhaUnidade) |
+| POST /unidades/minha/vinculos/solicitacoes | solicitarVinculo |
+| POST /unidades/minha/inquilinos | criarInquilino (cadastrarInquilino) |
+| DELETE /unidades/minha/inquilinos/{vinculoId} | deletarInquilino (encerrarInquilino) |
+| GET /unidades/{unidadeId} | buscarUnidade (getUnidade) |
+| GET /unidades/{unidadeId}/vinculos/solicitacoes | buscarSolicitacoesVinculo (listarSolicitacoesVinculo) |
+| PATCH /unidades/{unidadeId}/vinculos/solicitacoes/{solicitacaoId} | decidirSolicitacaoVinculo |
+| GET /encomendas | buscarEncomendas (listarEncomendas) |
+| POST /encomendas | criarEncomenda (registrarEncomenda) |
+| GET /encomendas/{encomendaId} | buscarEncomenda (getEncomenda) |
+| POST /encomendas/{encomendaId}/autorizacoes-retirada | autorizarRetiradaTerceiro |
+| POST /encomendas/{encomendaId}/retirada | confirmarRetirada (confirmarRetiradaEncomenda) |
+| POST /encomendas/{encomendaId}/ocorrencias | abrirOcorrencia (abrirOcorrenciaEncomenda) |
+| GET /notificacoes | buscarNotificacoes (listarNotificacoes) |
+| PATCH /notificacoes/{notificacaoId}/lida | marcarNotificacaoLida |
+| GET /condominio/personalizacao | buscarPersonalizacao (getPersonalizacao) |
+| PATCH /condominio/personalizacao | alterarPersonalizacao (atualizarPersonalizacao) |
+| GET /condominio/modulos | buscarModulos (listarModulos) |
+| PATCH /condominio/modulos/{modulo} | alterarModulo (atualizarModulo) |
+
+## Stack
+- Java 21, Spring Boot 3.x, Maven.
+- Spring Web, Spring Data JPA e Bean Validation.
+- **Spring Security** (`spring-boot-starter-security`) + **`spring-boot-starter-oauth2-resource-server`**, usado apenas pelo suporte nativo a JWT (Nimbus): `NimbusJwtEncoder` para gerar e `NimbusJwtDecoder` para validar tokens HS256 com um segredo próprio. Não há Authorization Server nem Keycloak.
+- BCrypt (`BCryptPasswordEncoder`, já incluído no Spring Security) para as senhas.
+- HMAC-SHA256 do webhook com `javax.crypto.Mac` do próprio JDK.
+- SQLite em arquivo (`morah.db` na raiz), com `org.xerial:sqlite-jdbc` e `org.hibernate.community.dialect.SQLiteDialect` (`hibernate-community-dialects`). Use `maximum-pool-size: 1` no Hikari.
+- Lombok permitido apenas para `@Getter`, `@Setter` e `@NoArgsConstructor` nas entidades.
+- JUnit 5, MockMvc e `spring-security-test` para os testes.
+- Porta 8080 com `server.servlet.context-path: /v1` (servidor local do contrato: `http://localhost:8080/v1`).
+
+## Estrutura (MVC)
+**Pacotes** em `br.com.morah`: `controller`, `service`, `repository`, `model`, `dto`, `exception`, `config`, `security` e `pattern`.
+
+**Entidades:** Condominio, Pessoa, PessoaPerfil (pessoa + perfil + condomínio + unidade opcional), Sessao, Bloco, Unidade, VinculoUnidade, SolicitacaoVinculo, Taxa, Cobranca, DocumentoFinanceiro, Visitante, AutorizacaoVisita, Acesso, Aviso, LeituraAviso, AreaComum, Reserva, Vistoria, Ocorrencia, Encomenda, AutorizacaoRetirada, Notificacao, Personalizacao e ModuloCondominio.
+- `PublicoAlvo` é `@Embeddable` dentro de Aviso.
+- `fotosUrl` da vistoria é `@ElementCollection`.
+
+**IDs:** `Long` com autoincremento (o contrato usa `integer/int64`).
+
+**DTOs:** um `record` para cada schema de objeto do contrato, com o mesmo nome (`LoginRequest`, `AvisoCreateRequest`, `CobrancaPage`, `PageMetadata`, `Personalizacao` etc.), e um `enum` Java para cada schema de enum (`Perfil`, `TipoRateio`, `ModuloCodigo`, `StatusAcesso` etc.). Nenhum outro DTO.
+- O schema `Problem` (e `ErroCampo`) NÃO vira record: use o `ProblemDetail` nativo do Spring Boot 3 com a propriedade extra `erros`.
+- Os três dashboards são records que implementam uma `sealed interface Dashboard`.
+- `UsuarioLogado` (pessoaId, sessaoId, perfil, condominioId, unidadeId), lido das claims do JWT, fica no pacote `security`. Não é DTO.
+- Como algumas entidades e DTOs têm nomes iguais (ex.: `Aviso`), as entidades ficam em `model` e os DTOs em `dto`; use o nome qualificado onde os dois se encontram.
+
+**Validação:**
+- Os `*CreateRequest` e `*Request` têm os obrigatórios do contrato validados com Bean Validation (`@NotNull`, `@NotBlank`, `@Email`, `@Min`/`@Max`, `@Pattern` para competência `^\d{4}-\d{2}$` e cores `^#[0-9A-Fa-f]{6}$`).
+- Os `*UpdateRequest` têm todos os campos opcionais; PATCH altera somente os campos enviados (não nulos).
+- Exceção: em `PersonalizacaoUpdateRequest`, `logoUrl: null` enviado explicitamente remove a logo. Para distinguir "não enviado" de "nulo", receba o corpo como `JsonNode` só nesse endpoint, ou use `Optional<String>` no record. Registre a escolha no README.
+
+**Paginação:**
+- Parâmetros `page` (padrão 0, mínimo 0) e `size` (padrão 20, de 1 a 100; fora disso → 400).
+- As respostas `XxxPage` seguem o formato do contrato `{ content, page: PageMetadata }`. Não devolva o `Page` do Spring diretamente. `sort` não é suportado.
+- `GET /notificacoes` aceita `page`/`size`, mas devolve só o array.
+
+**JSON:** `spring.jackson.default-property-inclusion: non_null` (campos nulos são omitidos). Exceção: `Personalizacao.logoUrl` aparece como `null` quando não há logo.
+
+## Autenticação e permissões (JWT + Spring Security)
+- **Login:** `POST /auth/login` com e-mail e senha. A senha é verificada com BCrypt. Credenciais inválidas → 401.
+- **Sessão:** cada login cria uma `Sessao` com: id (UUID), pessoa, perfil ativo, condomínio ativo, unidade ativa (opcional), `refreshToken` (UUID opaco) e `refreshExpiraEm` (7 dias).
+- **Contexto inicial:** o primeiro `PessoaPerfil` da pessoa (menor id). `LoginResponse` traz também todos os `perfisDisponiveis`.
+- **Access token:** JWT HS256 assinado com `morah.jwt.segredo` (application.yml, mínimo de 32 bytes), validade de 3600 s, com as claims `sub` (pessoaId), `sid` (id da sessão), `perfil`, `condominio_id` e `unidade_id` (omitida para síndico e portaria). `tokenType` = `"Bearer"`.
+- **Validação do token:** o `JwtDecoder` valida assinatura e expiração e um `OAuth2TokenValidator` próprio confere se a sessão `sid` ainda existe. Assim o logout invalida o access token imediatamente.
+- **Papéis:** um `JwtAuthenticationConverter` transforma a claim `perfil` em `ROLE_<PERFIL>`. `proprietario` recebe também `ROLE_MORADOR`, porque o contrato diz que o proprietário é cumulativo ao morador.
+- **RBAC declarativo:** `@EnableMethodSecurity` e `@PreAuthorize("hasAnyRole(...)")` em cada método de controller, com exatamente os perfis listados em `security: bearerAuth: [...]` daquela operação no contrato.
+- **Rotas públicas:** `/auth/login`, `/auth/refresh` e `/financeiro/webhooks/pagamentos`. Todas as outras exigem token.
+- **Configuração:** sessão `STATELESS`, CSRF desabilitado, sem form login nem HTTP Basic.
+- **Erros de segurança:** `AuthenticationEntryPoint` (401) e `AccessDeniedHandler` (403) próprios, respondendo `ProblemDetail` em `application/problem+json`, igual ao resto da API.
+- **`POST /auth/contexto`:** se a pessoa não tiver o vínculo (condomínio, perfil) pedido → 403. Caso contrário, apaga a sessão atual e cria outra com o novo contexto.
+- **`POST /auth/refresh`:** procura a sessão pelo refresh token. Se não existir ou estiver vencido → 401. Senão, apaga a sessão e cria outra com o mesmo contexto (rotação).
+- **`POST /auth/logout`:** apaga a sessão do `sid` (204).
+- **Contexto vem do token:** condomínio, unidade e perfil vêm SEMPRE do `UsuarioLogado`. Nunca da URL, exceto nos endpoints administrativos `/unidades/{unidadeId}` do síndico, e mesmo assim só dentro do condomínio ativo.
+- **Escopo de unidade:** morador ou proprietário acessando recurso de outra unidade (cobrança, autorização de visita, reserva, encomenda) → 403.
+- **Escopo de condomínio:** qualquer recurso de outro condomínio → 404.
+
+## Módulos ativáveis
+- Um `HandlerInterceptor` (`ModuloAtivoInterceptor`) mapeia o prefixo da rota para o módulo:
+  - `/financeiro/**` → `financeiro` (exceto o webhook)
+  - `/portaria/**` → `portaria`
+  - `/avisos/**` → `avisos`
+  - `/areas-comuns/**` e `/reservas/**` → `reservas`
+  - `/unidades/**` → `minha_unidade`
+  - `/encomendas/**` → `encomendas`
+- Se o módulo estiver desativado no condomínio do token → 403 com `detail` "Módulo X desativado neste condomínio", para qualquer perfil, inclusive síndico.
+- O interceptor consulta o Singleton `CacheModulosAtivos`, que é atualizado sempre que o síndico altera um módulo.
+- Login, Tela Inicial, Notificações e Personalização nunca são bloqueados.
+- Como as notificações continuam acessíveis, notificações já geradas por um módulo desativado continuam visíveis.
+
+## Erros (RFC 9457)
+Um único `@RestControllerAdvice` devolve `ProblemDetail` com `Content-Type: application/problem+json`, preenchendo `title`, `status` e `detail` em português.
+- Em erros de validação (400), inclua `erros: [{ campo, mensagem }]`.
+- Use exatamente os códigos documentados em cada operação: 400, 401, 403, 404, 409 e 410.
+
+## Regras de negócio
+O contrato já descreve as regras no `description` de cada operação. Resumo e detalhes de implementação:
+
+### Financeiro
+- **Status `atrasado`:** calculado na leitura (cobrança `pendente` com vencimento anterior a hoje). Não há job agendado.
+- **PIX:** gateway simulado. O código é uma string fixa + id + valor, com `expiraEm` = agora + 30 min. Cobrança `pago` ou `cancelado` → 409.
+- **Baixa manual:** marca a cobrança como `pago` (já paga ou cancelada → 409). Meio, data e observação não são persistidos, porque `Cobranca` não os expõe.
+- **Webhook:** `X-Webhook-Signature` = HMAC-SHA256 em hexadecimal do corpo bruto, com o segredo `morah.webhook.segredo`. Assinatura inválida → 401. Receba o corpo como `String` para calcular a assinatura e converta com `ObjectMapper`. Processamento síncrono, resposta 202. Baixa manual e webhook passam pelo `ProcessamentoPagamentoTemplate` (ver Design patterns).
+- **Geração em lote:** usa a Strategy `EstrategiaRateio`. Arredonde com `BigDecimal` em 2 casas (HALF_UP). Unidades com falha vão para `falhas`.
+- **Inadimplência:** conforme o `description` da operação.
+
+### Portaria
+- **Expiração:** `MINUTOS_EXPIRACAO_AUTORIZACAO = 30`; o status `expirada` é calculado na leitura.
+- **Status de acesso:** conforme o contrato (`no_condominio` / `saiu`).
+
+### Avisos
+- Visibilidade por público-alvo, `categoria` e `prioridade` como filtros, `LeituraAviso` (pessoa + aviso) para `lidoPeloUsuario`.
+- `deletarAviso` expira o aviso (não apaga).
+
+### Reservas
+- Horários de 1 hora das 08:00 às 22:00 (constantes `HORA_ABERTURA` e `HORA_FECHAMENTO`).
+- Sobreposição com reserva `confirmada` → 409.
+
+### Minha Unidade
+- Convite de inquilino pelo canal e-mail (simulado).
+- Encerrar inquilino apaga o `PessoaPerfil` e as `Sessao` dele.
+
+### Encomendas
+- Código de retirada de 6 dígitos gerado pelo Singleton `GeradorCodigo`.
+- Ocorrência de extravio marca a encomenda como `extraviada`.
+
+### Personalização
+- Cada condomínio tem exatamente uma `Personalizacao` (criada no seed) e uma linha de `ModuloCondominio` por valor de `ModuloCodigo`.
+- `nome` do módulo é preenchido pelo servidor a partir do enum ("Financeiro", "Portaria", "Avisos", "Reservas", "Minha Unidade", "Encomendas").
+- `atualizadoEm` é preenchido pelo servidor.
+
+### Notificações
+Disparadas via `NotificacaoTemplate` em:
+- criar aviso
+- registrar visitante e reenviar autorização
+- criar encomenda
+- criar reserva
+- gerar cobranças e pagamento confirmado pelo webhook
+- convite de inquilino
+
+### Dashboard
+- Limite de 5 itens nas listas.
+- Seções de módulos desativados vêm vazias (`[]`, `0`) ou ausentes (`inadimplencia` quando o financeiro está desativado).
+
+## Design patterns
+Cada pattern deve ter um comentário curto dizendo qual problema resolve ali.
+
+No total são **8 usos: 3 Template Method, 3 Strategy e 2 Singleton**. Não crie outros patterns além destes.
+
+### Singleton (2 usos)
+O frontend já tem dois Singletons (cliente HTTP e logger). No backend, implemente dois, mostrando as duas formas clássicas de Singleton em Java (sem depender do container do Spring):
+1. **`GeradorCodigo`** (GoF clássico: construtor privado + `getInstance()` com o idiom *holder*): uma única instância de `SecureRandom`, que é cara de criar, gera os códigos de 6 dígitos de retirada de encomenda e de autorização de terceiros.
+2. **`CacheModulosAtivos`** (enum Singleton, `INSTANCE`): mantém em memória um `ConcurrentHashMap<Long, Set<ModuloCodigo>>` com os módulos ativos de cada condomínio, para o `ModuloAtivoInterceptor` não ir ao banco a cada requisição. É invalidado em `alterarModulo` e carregado sob demanda.
+
+O `TokenService` (que gera os JWT) é um `@Service` comum do Spring e NÃO deve ser apresentado como pattern.
+
+### Template Method (3 usos)
+1. **`BaseCrudController<T>`:** fluxo fixo por requisição (obter o `UsuarioLogado` → validar payload → executar → verificar escopo do recurso → responder), com os hooks `validar(input)` e `verificarEscopo(recurso, usuario)`.
+   - Lança 403 ou 404 conforme as regras de escopo; o RBAC por perfil fica no `@PreAuthorize`.
+   - Usado por `AvisoController` (CRUD completo), `ReservaController` e `EncomendaController`, que só expõem os métodos que o contrato tem.
+2. **`NotificacaoTemplate`:** fluxo fixo (montar payload → escolher canal → enviar → registrar a `Notificacao` no banco). O envio é simulado com log.
+3. **`ProcessamentoPagamentoTemplate`:** fluxo fixo para quitar uma cobrança (validar origem → localizar cobrança → verificar se pode ser paga → marcar como `pago` → notificar a unidade).
+   - `BaixaManualProcessador`: na validação, exige um síndico do mesmo condomínio; cobrança paga ou cancelada → 409.
+   - `WebhookPagamentoProcessador`: na validação, confere a assinatura HMAC (inválida → 401); status `falhou` encerra o fluxo sem alterar nada.
+   - Os passos comuns (localizar, verificar, marcar como pago, notificar via `NotificacaoTemplate`) ficam só na classe base.
+
+### Strategy (3 usos)
+1. **`EstrategiaRateio`:** `RateioIgualitario` e `RateioFracaoIdeal`, escolhida pelo `tipoRateio` da taxa.
+2. **`CanalNotificacao`:** `CanalPush` (portaria, encomenda, aviso, reserva) e `CanalEmail` (convite de inquilino e financeiro), escolhido no passo "escolher canal" do `NotificacaoTemplate`.
+3. **`MontadorDashboard`:** `DashboardMoradorMontador` (morador e proprietário), `DashboardSindicoMontador` e `DashboardPortariaMontador`, escolhido pelo perfil ativo.
+
+## Dados iniciais
+Crie um `data.sql` mínimo, que só insere se o banco estiver vazio (`INSERT OR IGNORE` com ids fixos), com apenas o necessário para demonstrar as telas e rodar os testes. Os logins são os exemplos de `POST /auth/login` do contrato, todos com senha `demo123`. Gere o hash BCrypt e grave só o hash; nunca a senha em texto.
+
+- **Condomínio e unidades:**
+  - 1 condomínio "Condomínio Demo" e os blocos "Bloco A" e "Bloco B".
+  - Unidade "Apto 302" no Bloco A e "Apto 502" no Bloco B, ambas com `fracaoIdeal` 0.5.
+- **Pessoas e perfis:**
+  - Helena Prado (`helena.prado@demo.com.br`): `sindico`.
+  - Rafael Nunes (`rafael.nunes@demo.com.br`): `proprietario` do Apto 302.
+  - Camila Duarte (`camila.duarte@demo.com.br`): `morador` do Apto 502.
+  - Portaria Central (`portaria@demo.com.br`): `portaria`.
+- **Personalização:** `nomeExibicao` "Condomínio Demo", `logoUrl` nulo, cores `#1F4E79`, `#F2F4F7` e `#F59E0B` (os `example` do contrato). Os seis módulos ativos.
+- **Demais dados:**
+  - 1 taxa da competência "2026-09" com uma cobrança por unidade.
+  - 1 aviso para o condomínio.
+  - 1 área comum "Salão de festas".
+  - 1 encomenda aguardando retirada no Apto 302.
+  - 1 autorização de visita pendente para o Apto 302.
+
+Não invente nada além disso.
+
+## Testes
+Testes de integração com MockMvc usando um SQLite separado (`target/test.db`). Os testes obtêm o token chamando `POST /auth/login` de verdade com os usuários do seed. Cobrir:
+- **Auth:**
+  - Login válido → 200 com `accessToken`, `refreshToken` e contexto.
+  - Login com senha errada → 401.
+  - `/auth/me` sem token, com token adulterado ou com token expirado → 401.
+  - Contexto com vínculo inexistente → 403.
+  - Refresh válido → 200; refresh inválido → 401; o refresh antigo não funciona depois da rotação.
+  - Logout invalida o access token (a chamada seguinte retorna 401).
+- **403 por perfil:**
+  - Morador criando aviso.
+  - Morador gerando cobranças.
+  - Portaria listando cobranças.
+  - Morador registrando visitante.
+  - Morador (não proprietário) cadastrando inquilino.
+  - Morador alterando personalização ou módulos.
+- **Proprietário cumulativo:** proprietário acessando rota de `morador` → 200.
+- **Financeiro:**
+  - Morador lendo cobrança de outra unidade → 403.
+  - PIX de cobrança paga → 409.
+  - Rateio igualitário e por fração geram os valores corretos.
+  - Webhook com assinatura inválida → 401; com assinatura válida marca a cobrança como paga.
+- **Portaria:**
+  - Decisão em autorização já decidida → 409.
+  - Decisão em autorização expirada → 409.
+- **Reservas:**
+  - Reserva sobreposta → 409.
+  - Vistoria com dano cria ocorrência.
+- **Avisos:**
+  - Aviso expirado → 410.
+  - GET de aviso marca como lido.
+  - PATCH parcial altera só o campo enviado.
+- **Encomendas:**
+  - Retirada com código inválido → 409.
+  - Retirada com código de terceiro válido → 200.
+  - Registrar encomenda cria notificação.
+- **Personalização:**
+  - Cor fora do formato `#RRGGBB` → 400.
+  - PATCH parcial de cores mantém os outros campos.
+  - Desativar `encomendas` faz `GET /encomendas` → 403; reativar volta a 200.
+  - Com `encomendas` desativado, o dashboard do morador vem com `encomendasPendentes` vazio.
+- **Gerais:**
+  - Paginação com `size=101` → 400.
+  - Dashboard devolve o `perfil` correto para cada usuário.
+
+Inclua também testes unitários simples de cada pattern:
+- **Singletons:** `getInstance()` e `INSTANCE` devolvem sempre o mesmo objeto; o cache é invalidado.
+- **Templates:** ordem dos passos nos três; no `ProcessamentoPagamentoTemplate`, o webhook com `falhou` para antes de marcar como pago.
+- **Strategies:** troca de estratégia.
+
+Não exija meta de cobertura.
+
+## Entregáveis
+- Todos os arquivos com código completo (nunca "// resto do código aqui").
+- `pom.xml`, `application.yml` (com `morah.jwt.segredo` e `morah.webhook.segredo` de desenvolvimento) e `data.sql`.
+- O arquivo `morah-openapi.yaml` copiado para a raiz do repositório.
+- README com:
+  - autores do projeto;
+  - como rodar (`mvn spring-boot:run`) e como testar (`mvn test`);
+  - usuários de demonstração e exemplos `curl` (login, chamada com Bearer, refresh, logout);
+  - tabela endpoint → classe e método responsáveis;
+  - onde está cada design pattern;
+  - as decisões tomadas por simplicidade.
+
+## Critério de pronto
+- `mvn clean test` passa sem erros.
+- O app sobe em `http://localhost:8080/v1` criando o `morah.db`.
+- Antes de finalizar, confira que:
+  - os 55 endpoints, campos e perfis batem com o contrato;
+  - os nomes de método seguem a tabela acima;
+  - nada foi criado além do contrato e das regras listadas.
+  -  Adicione Swagger para validação de apis
+
+## Versionamento (Git)
+Repositório `morah-backend`, branch `main`, com um commit por módulo, na ordem abaixo. Cada commit traz o código do módulo, os testes dele e os dados do módulo no `data.sql`.
+
+Regras:
+- Rode `mvn clean test` antes de cada commit e só faça o commit se tudo passar.
+- Nunca junte dois módulos no mesmo commit nem deixe código de um módulo futuro adiantado.
+- Mensagens em português, no padrão `tipo(modulo): descrição`.
+- Não versione `morah.db`, `target/` nem arquivos da IDE (crie o `.gitignore` no primeiro commit).
+
+Ordem dos commits:
+1. `chore(projeto)`: pom.xml, application.yml, classe principal, .gitignore, `morah-openapi.yaml` e README básico com autores.
+2. `feat(base)`: `@RestControllerAdvice` com ProblemDetail, exceções, `PageMetadata`, `BaseCrudController<T>` (Template Method) e `GeradorCodigo` (Singleton GoF).
+3. `feat(login)`: Condominio, Bloco, Unidade (apenas entidades), Pessoa, PessoaPerfil, Sessao, `SecurityConfig`, `TokenService` e `/auth/*`, com testes.
+4. `feat(notificacoes)`: Notificacao, `NotificacaoTemplate` (Template Method), `CanalNotificacao` (Strategy) e `/notificacoes`, com testes.
+5. `feat(avisos)`: Aviso, LeituraAviso, publicoAlvo e notificação, com testes.
+6. `feat(financeiro)`: Taxa, Cobranca, DocumentoFinanceiro, `EstrategiaRateio` (Strategy), `ProcessamentoPagamentoTemplate` (Template Method) com baixa manual e webhook, PIX e inadimplência, com testes.
+7. `feat(minha-unidade)`: VinculoUnidade, SolicitacaoVinculo, inquilinos e `/unidades/*`, com testes.
+8. `feat(portaria)`: Visitante, AutorizacaoVisita e Acesso, com testes.
+9. `feat(reservas)`: AreaComum, Reserva, Vistoria e Ocorrencia, com testes.
+10. `feat(encomendas)`: Encomenda, AutorizacaoRetirada e ocorrência de extravio, com testes.
+11. `feat(personalizacao)`: Personalizacao, ModuloCondominio, `CacheModulosAtivos` (Singleton enum), `ModuloAtivoInterceptor` e `/condominio/*`, com testes.
+12. `feat(dashboard)`: `MontadorDashboard` (Strategy) e `/home/dashboard`, respeitando módulos desativados, com testes.
+13. `docs(readme)`: README final.
+
+Ao final, mostre a saída de `git log --oneline`.
